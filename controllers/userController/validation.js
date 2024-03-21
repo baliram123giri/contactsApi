@@ -22,5 +22,10 @@ const updateUserValidation = Joi.object({
     is_active: Joi.boolean().optional(),
     first_time_login: Joi.boolean().optional(),
 })
-
-module.exports = { createUserValidation, updateUserValidation }
+const loginUserValidations = Joi.object(
+    {
+        email: Joi.string().email().required(),
+        password: Joi.string().required(),
+    }
+)
+module.exports = { createUserValidation, updateUserValidation , loginUserValidations}

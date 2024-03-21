@@ -1,8 +1,11 @@
 
+const { compareSync } = require("bcrypt");
 const UserType = require("../../models/UserTypeModel");
 const User = require("../../models/UsersModel");
-const { errorRequest } = require("../../utils/Helper");
-const { createUserValidation, updateUserValidation } = require("./validation");
+const { errorRequest, dateRangeSelection, pagination, getColumnsKeys, metaData } = require("../../utils/Helper");
+const { genarateToken } = require("../../utils/auth");
+const { createUserValidation, updateUserValidation, loginUserValidations } = require("./validation");
+const { Op } = require("sequelize");
 
 //create a new User
 async function createUser({ body }, res) {
@@ -16,18 +19,32 @@ async function createUser({ body }, res) {
 }
 
 //get a new User
-async function listUser({ }, res) {
+async function listUser({ query }, res) {
     try {
-        const data = await User.findAll({
+        const { limit, page, panginationSchema, rangeSearch } = await pagination(query)
+        const globleSearch = await getColumnsKeys(User, query?.search)
+
+        const { count, rows: data } = await User.findAndCountAll({
+            where: {
+                //global search 
+                ...(query?.search ? {
+                    [Op.or]: [...globleSearch, {
+                        "$UserType.name$": { [Op.like]: `%${query?.search}%` }
+                    }]
+                } : {}),
+                //range search
+                ...rangeSearch
+            },
             attributes: {
                 exclude: ["password"]
             },
             include: [{
                 model: UserType,
                 attributes: ["name"]
-            }]
+            }],
+            ...panginationSchema,
         })
-        return res.json(data)
+        return res.json(await metaData(data, page, count, limit, res));
     } catch (error) {
         await errorRequest(res, error)
     }
@@ -68,4 +85,31 @@ async function deleteUser({ params: { id } }, res) {
         await errorRequest(res, error)
     }
 }
-module.exports = { createUser, updateUser, deleteUser, listUser, singleUser }
+
+//login user
+async function loginUser({ body }, res) {
+    try {
+        await loginUserValidations.validateAsync(body)
+        const user = await User.findOne({
+            where: { email: body.email }, include: [{
+                model: UserType,
+                attributes: ["name"]
+            }]
+        })
+        if (!user) return res.status(500).json({ message: 'Email or password wrong' })
+        //check password
+        const isVerified = compareSync(body.password, user.password)
+        if (!isVerified) return res.status(500).json({ message: 'Email or password wrong' })
+
+        const data = JSON.parse(JSON.stringify(user))
+        data.password = undefined
+        //create jwt token
+        const token = genarateToken({ id: user.id, role: user.UserType?.name })
+
+        return res.json({ data, token });
+    } catch (error) {
+        errorRequest(res, error);
+    }
+}
+
+module.exports = { createUser, updateUser, deleteUser, listUser, singleUser, loginUser }
